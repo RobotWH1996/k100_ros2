@@ -1,0 +1,85 @@
+# MoveIt uses this configuration for controller management
+
+moveit_controller_manager: moveit_simple_controller_manager/MoveItSimpleControllerManager
+
+moveit_simple_controller_manager:
+  controller_names:
+    - left_arm_controller
+    - right_arm_controller
+    - head_controller
+    - left_hand_controller
+    - right_hand_controller
+    - both_arms_controller
+
+  left_arm_controller:
+    type: FollowJointTrajectory
+    joints:
+      - left_shoulder_pitch_joint
+      - left_shoulder_roll_joint
+      - left_shoulder_yaw_joint
+      - left_elbow_joint
+      - left_wrist_roll_joint
+      - left_wrist_pitch_joint
+      - left_wrist_yaw_joint
+    action_ns: follow_joint_trajectory
+    default: true
+  right_arm_controller:
+    type: FollowJointTrajectory
+    joints:
+      - right_shoulder_pitch_joint
+      - right_shoulder_roll_joint
+      - right_shoulder_yaw_joint
+      - right_elbow_joint
+      - right_wrist_roll_joint
+      - right_wrist_pitch_joint
+      - right_wrist_yaw_joint
+    action_ns: follow_joint_trajectory
+    default: true
+  head_controller:
+    type: FollowJointTrajectory
+    joints:
+      - head_yaw_joint
+      - head_pitch_joint
+    action_ns: follow_joint_trajectory
+    default: true
+  left_hand_controller:
+    type: FollowJointTrajectory
+    joints:
+      - left_index_proximal_joint
+      - left_middle_proximal_joint
+      - left_pinky_proximal_joint
+      - left_ring_proximal_joint
+      - left_thumb_metacarpal_joint
+      - left_thumb_proximal_joint
+    action_ns: follow_joint_trajectory
+    default: true
+  right_hand_controller:
+    type: FollowJointTrajectory
+    joints:
+      - right_index_proximal_joint
+      - right_middle_proximal_joint
+      - right_pinky_proximal_joint
+      - right_ring_proximal_joint
+      - right_thumb_metacarpal_joint
+      - right_thumb_proximal_joint
+    action_ns: follow_joint_trajectory
+    default: true
+  both_arms_controller:
+    type: FollowJointTrajectory
+    joints:
+      - left_shoulder_pitch_joint
+      - left_shoulder_roll_joint
+      - left_shoulder_yaw_joint
+      - left_elbow_joint
+      - left_wrist_roll_joint
+      - left_wrist_pitch_joint
+      - left_wrist_yaw_joint
+      - right_shoulder_pitch_joint
+      - right_shoulder_roll_joint
+      - right_shoulder_yaw_joint
+      - right_elbow_joint
+      - right_wrist_roll_joint
+      - right_wrist_pitch_joint
+      - right_wrist_yaw_joint
+    action_ns: follow_joint_trajectory
+    default: true

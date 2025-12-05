@@ -1,0 +1,10 @@
+build/
+install/
+log/
+*.db3
+*.zip
+*.tar.gz
+*.iso
+*.obj
+*.o
+.DS_Store
