@@ -1,5 +1,5 @@
 string group_name
-float64[] joint_angles
+trajectory_msgs/JointTrajectoryPoint[] waypoints
 ---
 bool success
 string message

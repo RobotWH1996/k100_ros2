@@ -36,7 +36,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   srv/PlayRosbag.srv
   srv/ComputeIK.srv
   srv/PlanPoseGoal.srv
-  DEPENDENCIES geometry_msgs
+  DEPENDENCIES geometry_msgs trajectory_msgs
 )
 
 include_directories(include)

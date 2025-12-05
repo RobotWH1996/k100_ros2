@@ -247,9 +247,10 @@ moveit::planning_interface::MoveGroupInterface::Plan MotionPlanning::planJointGo
     tmp.clear();
   }
 
-  // 时间参数化 (MoveGroupInterface 不再提供 getMaxVelocity/AccelerationScalingFactor, 使用默认1.0 或自行维护变量)
+  // 时间参数化
   trajectory_processing::TimeOptimalTrajectoryGeneration totg;
-  if (!totg.computeTimeStamps(combined, 1.0, 1.0))  // 原来传 getMaxVelocityScalingFactor()/getMaxAccelerationScalingFactor()
+
+  if (!totg.computeTimeStamps(combined, 0.4, 0.4))
   {
     RCLCPP_ERROR(LOGGER, "Joint multi-goal: 时间参数化失败");
     return plan;

@@ -42,13 +42,12 @@ bool K100MotionPlanningNode::initialize() {
     }
 
     // 设置速度/加速度缩放
-    left_planner_->moveGroup()->setMaxVelocityScalingFactor(0.5);
-    left_planner_->moveGroup()->setMaxAccelerationScalingFactor(0.5);
-    right_planner_->moveGroup()->setMaxVelocityScalingFactor(0.5);
-    right_planner_->moveGroup()->setMaxAccelerationScalingFactor(0.5);
-    both_arms_planner_->moveGroup()->setMaxVelocityScalingFactor(0.5);
-    both_arms_planner_->moveGroup()->setMaxAccelerationScalingFactor(0.5);
-
+    left_planner_->moveGroup()->setMaxVelocityScalingFactor(0.4);
+    left_planner_->moveGroup()->setMaxAccelerationScalingFactor(0.4);
+    right_planner_->moveGroup()->setMaxVelocityScalingFactor(0.4);
+    right_planner_->moveGroup()->setMaxAccelerationScalingFactor(0.4);
+    both_arms_planner_->moveGroup()->setMaxVelocityScalingFactor(0.4);
+    both_arms_planner_->moveGroup()->setMaxAccelerationScalingFactor(0.4);
     // 初始化控制器切换客户端
     switch_controller_client_ = this->create_client<controller_manager_msgs::srv::SwitchController>(
         "/controller_manager/switch_controller", rmw_qos_profile_services_default, client_callback_group_);
@@ -180,7 +179,10 @@ void K100MotionPlanningNode::planJointGoalCallback(const std::shared_ptr<k100_mo
         return;
     }
 
-    std::vector<std::vector<double>> waypoints = {request->joint_angles};
+    std::vector<std::vector<double>> waypoints;
+    for (const auto& point : request->waypoints) {
+        waypoints.push_back(point.positions);
+    }
     auto plan = planner->planJointGoal(waypoints);
     
     if (plan.trajectory_.joint_trajectory.points.empty()) {

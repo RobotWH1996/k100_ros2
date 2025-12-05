@@ -57,13 +57,13 @@ ros2 launch k100_motion_planning k100_motion_planning.launch.py hand_name:=k100_
 
 **单臂 (Right Arm):**
 ```bash
-ros2 service call /plan_joint_goal k100_motion_planning/srv/PlanJointGoal "{group_name: 'right_arm', joint_angles: [0.0, -0.5, 0.0, -1.0, 0.0, 0.0, 0.0]}"
+ros2 service call /plan_joint_goal k100_motion_planning/srv/PlanJointGoal "{group_name: 'right_arm', waypoints: [{positions: [0.0, -0.5, 0.0, -1.0, 0.0, 0.0, 0.0]}]}"
 ```
 
 **双臂 (Both Arms):**
 > 注意：关节数组顺序通常为 [左臂关节..., 右臂关节...]，共 14 个关节。
 ```bash
-ros2 service call /plan_joint_goal k100_motion_planning/srv/PlanJointGoal "{group_name: 'both_arms', joint_angles: [0.0, 0.7, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}"
+ros2 service call /plan_joint_goal k100_motion_planning/srv/PlanJointGoal "{group_name: 'both_arms', waypoints: [{positions: [0.0, 0.7, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}]}"
 ```
 
 ### 3.2 播放 Rosbag 轨迹 (PlayRosbag)
@@ -82,3 +82,31 @@ ros2 service call /plan_pose_goal k100_motion_planning/srv/PlanPoseGoal "{group_
 ```bash
 ros2 service call /compute_ik k100_motion_planning/srv/ComputeIK "{group_name: 'left_arm', pose: {header: {frame_id: 'base_link'}, pose: {position: {x: 0.22356, y: 0.21, z: 0.87223}, orientation: {x: 0.6145, y: -0.61441, z: 0.34989, w: -0.3498}}}}"
 ```
+
+
+
+ros2 service call /plan_joint_goal k100_motion_planning/srv/PlanJointGoal "{group_name: 'right_arm', waypoints: [{positions: [0.0, -0.5, 0.0, -1.0, 0.0, 0.0, 0.0]}]}"
+
+ros2 service call /plan_joint_goal k100_motion_planning/srv/PlanJointGoal "{group_name: 'right_arm', waypoints: [{positions: [0.0, -0.5, 0.0, -1.0, 0.0, 0.0, 0.0]}, {positions: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}]}"
+
+ros2 service call /plan_joint_goal k100_motion_planning/srv/PlanJointGoal "{
+  group_name: 'both_arms',
+  waypoints: [
+    {positions: [
+      0.174533, 1.553343, 2.286381, 2.321288, -0.872665, -1.099557, -0.244346,
+      0.174533, 1.553343, 2.286381, 2.321288, -0.872665, -1.099557, -0.244346
+    ]},
+    {positions: [
+      0.157080, 1.431170, 2.460914, 2.164208, -0.680678, -0.977384, -0.244346,
+      0.157080, 1.431170, 2.460914, 2.164208, -0.680678, -0.977384, -0.244346
+    ]},
+    {positions: [
+      0.174533, 1.570796, 2.216568, 2.356194, -0.942478, -1.151917, -0.261799,
+      0.174533, 1.570796, 2.216568, 2.356194, -0.942478, -1.151917, -0.261799
+    ]},
+    {positions: [
+      0.331613, 1.239184, 2.391101, 1.815142, -0.750492, -0.942478, -0.331613,
+      0.331613, 1.239184, 2.391101, 1.815142, -0.750492, -0.942478, -0.331613
+    ]}
+  ]
+}"
