@@ -25,7 +25,14 @@ def generate_launch_description():
         description='选择灵巧手配置：k100_brainco 或 k100_rohand'
     )
 
+    use_rviz_arg = DeclareLaunchArgument(
+        'use_rviz',
+        default_value='true',
+        description='是否启用轨迹可视化发布（false 时不发布 /display_planned_path）'
+    )
+
     trajectory_config = LaunchConfiguration('trajectory_config_file')
+    use_rviz = LaunchConfiguration('use_rviz')
 
     def launch_setup(context):
         hand_name = LaunchConfiguration('hand_name').perform(context)
@@ -55,6 +62,7 @@ def generate_launch_description():
                 moveit_config.robot_description_kinematics,
                 moveit_config.joint_limits,
                 {'trajectory_config_file': trajectory_config},
+                {'use_rviz': use_rviz},
             ]
         )
 
@@ -63,5 +71,6 @@ def generate_launch_description():
     return LaunchDescription([
         trajectory_config_arg,
         hand_name_arg,
+        use_rviz_arg,
         OpaqueFunction(function=launch_setup),
     ])

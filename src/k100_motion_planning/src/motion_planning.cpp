@@ -10,14 +10,27 @@ using namespace k100_motion_planning;
 static const rclcpp::Logger LOGGER = rclcpp::get_logger("k100_motion_planning::MotionPlanning");
 
 
-MotionPlanning::MotionPlanning(rclcpp::Node::SharedPtr node, const std::string& planning_group)
+MotionPlanning::MotionPlanning(rclcpp::Node::SharedPtr node,
+                               const std::string& planning_group,
+                               std::shared_ptr<robot_model_loader::RobotModelLoader> shared_loader,
+                               planning_scene_monitor::PlanningSceneMonitorPtr shared_planning_scene_monitor,
+                               rclcpp::Publisher<moveit_msgs::msg::DisplayTrajectory>::SharedPtr shared_display_publisher)
   : node_(node),
     planning_group_(planning_group),
-    robot_model_loader_(node_, "robot_description"),
+    robot_model_loader_ptr_(std::move(shared_loader)),
+    owns_robot_model_loader_(false),
     move_group_(node_, planning_group_)
 {
+  if (!robot_model_loader_ptr_) {
+    robot_model_loader_ptr_ = std::make_shared<robot_model_loader::RobotModelLoader>(node_, "robot_description");
+    owns_robot_model_loader_ = true;
+  }
+
+  planning_scene_monitor_ = std::move(shared_planning_scene_monitor);
+  display_publisher_ = std::move(shared_display_publisher);
+
   // constructor body intentionally small; heavy init in initialize()
-  robot_model_ = robot_model_loader_.getModel();
+  robot_model_ = robot_model_loader_ptr_->getModel();
   robot_state_.reset(new moveit::core::RobotState(robot_model_));
   joint_model_group_ = robot_state_->getJointModelGroup(planning_group_);
   planning_scene_.reset(new planning_scene::PlanningScene(robot_model_));
@@ -55,54 +68,40 @@ bool MotionPlanning::initialize()
   //     RCLCPP_INFO(LOGGER, "[JointLimits] 所有关节速度/加速度限制已加载");
   // }
   // planning_scene_->getCurrentStateNonConst().setToDefaultValues(joint_model_group_, "ready");
-  display_publisher_ = node_->create_publisher<moveit_msgs::msg::DisplayTrajectory>("/display_planned_path", 1);
-  visual_tools_.reset(new moveit_visual_tools::MoveItVisualTools(node_, "base_link","k100_motion_trajectory", move_group_.getRobotModel()));
-  visual_tools_->enableBatchPublishing();
-  visual_tools_->deleteAllMarkers();  
-  visual_tools_->loadRemoteControl();
-  visual_tools_->trigger();
+  
+  // DisplayTrajectory发布器(可选,用于RViz显示)
+  // 由上层节点按需注入（例如 use_rviz:=false 时不注入，避免无意义发布）
 
-  if (!display_publisher_)
-    display_publisher_ = node_->create_publisher<moveit_msgs::msg::DisplayTrajectory>("display_planned_path", 10);
-
-
-  // Joy 按钮方式 STOP (默认使用第4号索引按钮, 参数可调)
-  try {
-      stop_button_index_ = node_->declare_parameter<int>("stop_button_index", 4);
-  } catch (const rclcpp::exceptions::ParameterAlreadyDeclaredException&) {
-      node_->get_parameter("stop_button_index", stop_button_index_);
-  }
-  joy_sub_ = node_->create_subscription<sensor_msgs::msg::Joy>(
-      "rviz_visual_tools_gui", 10,
-      [this](const sensor_msgs::msg::Joy::SharedPtr msg)
-      {
-        if (stop_button_index_ >= 0 && stop_button_index_ < static_cast<int>(msg->buttons.size()))
-        {
-          if (msg->buttons[stop_button_index_] != 0)
-          {
-            static bool exiting = false;
-            if (!exiting) {
-              exiting = true;
-              RCLCPP_WARN(LOGGER, "Joy STOP 按钮(索引=%d) 被按下, 退出节点...", stop_button_index_);
-              rclcpp::shutdown();
-              std::exit(0);
-            }
-          }
-        }
-      });
-
-  planning_scene_monitor_ = std::make_shared<planning_scene_monitor::PlanningSceneMonitor>(node_, "robot_description");
+  // PlanningSceneMonitor 建议由上层节点共享创建；这里仅在未注入共享对象时兜底创建
   if (!planning_scene_monitor_)
   {
-    RCLCPP_ERROR(LOGGER, "初始化 PlanningSceneMonitor 失败");
-  }
-  else
-  {
+    planning_scene_monitor_ = std::make_shared<planning_scene_monitor::PlanningSceneMonitor>(
+        node_, planning_scene_, robot_model_loader_ptr_, "");
+    if (!planning_scene_monitor_)
+    {
+      RCLCPP_ERROR(LOGGER, "初始化 PlanningSceneMonitor 失败");
+      return false;
+    }
+
     planning_scene_monitor_->providePlanningSceneService();
     planning_scene_monitor_->startSceneMonitor();
     planning_scene_monitor_->startStateMonitor();
-    planning_scene_monitor_->startWorldGeometryMonitor();
-    RCLCPP_INFO(LOGGER, "PlanningSceneMonitor 已启动");
+
+    // bool enable_world_geometry_monitor = false;
+    // try {
+    //   enable_world_geometry_monitor = node_->declare_parameter<bool>("enable_world_geometry_monitor", false);
+    // } catch (const rclcpp::exceptions::ParameterAlreadyDeclaredException&) {
+    //   node_->get_parameter("enable_world_geometry_monitor", enable_world_geometry_monitor);
+    // }
+    // if (enable_world_geometry_monitor) {
+    //   planning_scene_monitor_->startWorldGeometryMonitor();
+    // }
+
+    RCLCPP_INFO(LOGGER, "PlanningSceneMonitor 已启动(本实例创建)");
+  }
+  else
+  {
+    RCLCPP_INFO(LOGGER, "PlanningSceneMonitor 已注入共享实例");
   }
 
   return true;
@@ -154,9 +153,11 @@ moveit::planning_interface::MoveGroupInterface::Plan MotionPlanning::planPoseGoa
   }
 
   // 可视化使用新版成员
-  visual_tools_->deleteAllMarkers();
-  visual_tools_->publishTrajectoryLine(plan.trajectory_, robot_model_->getLinkModel(ee_link), joint_model_group_);
-  visual_tools_->trigger();
+  if (visual_tools_) {
+    visual_tools_->deleteAllMarkers();
+    visual_tools_->publishTrajectoryLine(plan.trajectory_, robot_model_->getLinkModel(ee_link), joint_model_group_);
+    visual_tools_->trigger();
+  }
 
   RCLCPP_WARN(LOGGER, "规划成功, 轨迹总点数: %zu", plan.trajectory_.joint_trajectory.points.size());
   // // 发布 DisplayTrajectory
@@ -178,6 +179,11 @@ moveit::planning_interface::MoveGroupInterface::Plan MotionPlanning::planJointGo
   {
     std::vector<std::string> link_names = move_group_.getLinkNames();
     ee_link = link_names.back();
+    // for(const auto& link_names : move_group_.getLinkNames())
+    // {
+    //   RCLCPP_WARN(LOGGER, "可用连杆: %s",link_names.c_str());
+    // }
+    // RCLCPP_WARN(LOGGER, "以末端连杆: %s为目标进行规划", ee_link.c_str());
   }
 
   moveit::planning_interface::MoveGroupInterface::Plan plan;
@@ -261,9 +267,19 @@ moveit::planning_interface::MoveGroupInterface::Plan MotionPlanning::planJointGo
   RCLCPP_WARN(LOGGER, "Joint multi-goal: 轨迹总段数=%zu, 合并后轨迹总点数=%zu", partial_trajs.size(), plan.trajectory_.joint_trajectory.points.size());
 
   // 可视化
-  visual_tools_->deleteAllMarkers();  
-  visual_tools_->publishTrajectoryLine(plan.trajectory_, robot_model_->getLinkModel(ee_link), joint_model_group_);
-  visual_tools_->trigger();
+  if (visual_tools_) {
+    visual_tools_->deleteAllMarkers();
+    if (move_group_.getName()=="both_arms")
+    {
+        visual_tools_->publishTrajectoryLine(plan.trajectory_, robot_model_->getLinkModel("left_arm_ee_link"), joint_model_group_);
+        visual_tools_->publishTrajectoryLine(plan.trajectory_, robot_model_->getLinkModel("right_arm_ee_link"), joint_model_group_);
+    }
+    else
+    {
+      visual_tools_->publishTrajectoryLine(plan.trajectory_, robot_model_->getLinkModel(ee_link), joint_model_group_);
+    }
+    visual_tools_->trigger();
+  }
 
   if (display_publisher_)
   {
@@ -591,4 +607,68 @@ bool MotionPlanning::allowCollisionBetween(const std::string& object_a, const st
 
   RCLCPP_INFO(LOGGER, "allowCollisionBetween: %s <-> %s 设置为 %s", object_a.c_str(), object_b.c_str(), allow?"允许":"禁止");
   return true;
+}
+
+bool MotionPlanning::enableVisualization(const std::string& base_frame,
+                                         const std::string& marker_topic,
+                                         bool enable_remote_control)
+{
+  if (visual_tools_) {
+    RCLCPP_WARN(LOGGER, "可视化工具已启用,跳过重复初始化");
+    return true;
+  }
+  
+  RCLCPP_INFO(LOGGER, "启用可视化工具: base_frame=%s, marker_topic=%s, remote_control=%s",
+              base_frame.c_str(), marker_topic.c_str(), enable_remote_control?"true":"false");
+  
+  try {
+    visual_tools_.reset(new moveit_visual_tools::MoveItVisualTools(
+        node_, base_frame, marker_topic, move_group_.getRobotModel()));
+    
+    visual_tools_->enableBatchPublishing();
+    visual_tools_->deleteAllMarkers();
+    
+    if (enable_remote_control) {
+      visual_tools_->loadRemoteControl();  // 订阅Joy话题,有资源开销
+      RCLCPP_INFO(LOGGER, "可视化远程控制(Joy)已启用");
+    }
+    
+    visual_tools_->trigger();
+    
+    RCLCPP_INFO(LOGGER, "可视化工具初始化成功");
+    return true;
+    
+  } catch (const std::exception& e) {
+    RCLCPP_ERROR(LOGGER, "可视化工具初始化失败: %s", e.what());
+    visual_tools_.reset();
+    return false;
+  }
+}
+
+void MotionPlanning::enableJoyButtonStop(int button_index, const std::string& topic)
+{
+  stop_button_index_ = button_index;
+  joy_button_exiting_ = false;
+  
+  RCLCPP_INFO(LOGGER, "启用Joy按钮停止功能: 按钮索引=%d, 话题=%s", button_index, topic.c_str());
+  
+  joy_sub_ = node_->create_subscription<sensor_msgs::msg::Joy>(
+      topic, 10,
+      [this](const sensor_msgs::msg::Joy::SharedPtr msg)
+      {
+        // 检查按钮索引合法性
+        if (stop_button_index_ < 0 || stop_button_index_ >= static_cast<int>(msg->buttons.size())) {
+          return;
+        }
+        
+        // 检测按钮按下且未处于退出状态
+        if (msg->buttons[stop_button_index_] != 0 && !joy_button_exiting_)
+        {
+          joy_button_exiting_ = true;
+          RCLCPP_WARN(LOGGER, "Joy STOP按钮(索引=%d)被按下, 正在关闭节点...", stop_button_index_);
+          
+          // 优雅关闭ROS2上下文
+          rclcpp::shutdown();
+        }
+      });
 }

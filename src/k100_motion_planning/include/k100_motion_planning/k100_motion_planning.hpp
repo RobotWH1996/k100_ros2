@@ -11,7 +11,11 @@
 #include <sensor_msgs/msg/joint_state.hpp>
 #include <trajectory_msgs/msg/joint_trajectory_point.hpp>
 #include <moveit_msgs/msg/robot_trajectory.hpp>
+#include <moveit_msgs/msg/display_trajectory.hpp>
 #include <controller_manager_msgs/srv/switch_controller.hpp>
+#include <moveit/robot_model_loader/robot_model_loader.h>
+#include <moveit/planning_scene/planning_scene.h>
+#include <moveit/planning_scene_monitor/planning_scene_monitor.h>
 
 #include "k100_motion_planning/motion_planning.hpp"
 #include "k100_motion_planning/srv/plan_joint_goal.hpp"
@@ -30,6 +34,15 @@ private:
     std::shared_ptr<MotionPlanning> left_planner_;
     std::shared_ptr<MotionPlanning> right_planner_;
     std::shared_ptr<MotionPlanning> both_arms_planner_;
+
+    std::shared_ptr<robot_model_loader::RobotModelLoader> shared_robot_model_loader_;
+
+    // 共享的 PlanningScene / Monitor（避免每个规划组重复订阅与重复提供服务）
+    planning_scene::PlanningScenePtr shared_planning_scene_;
+    planning_scene_monitor::PlanningSceneMonitorPtr shared_planning_scene_monitor_;
+
+    // 共享的 DisplayTrajectory 发布器（用于 RViz 显示）
+    rclcpp::Publisher<moveit_msgs::msg::DisplayTrajectory>::SharedPtr display_publisher_;
     
     rclcpp::Service<k100_motion_planning::srv::PlanJointGoal>::SharedPtr plan_joint_goal_srv_;
     rclcpp::Service<k100_motion_planning::srv::PlayRosbag>::SharedPtr play_rosbag_srv_;
@@ -42,6 +55,7 @@ private:
     rclcpp::CallbackGroup::SharedPtr client_callback_group_;
 
     void waitForJointStates();
+    std::shared_ptr<MotionPlanning> initializePlannerIfNeeded(const std::string& group_name);
     std::shared_ptr<MotionPlanning> getPlanner(const std::string& group_name);
     bool switchControllers(const std::string& target_group);
 

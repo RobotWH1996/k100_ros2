@@ -36,14 +36,35 @@ public:
    *  @param node 共享 ROS2 节点指针
    *  @param planning_group 规划组名称 (对应 SRDF 中的 group)
    */
-  explicit MotionPlanning(rclcpp::Node::SharedPtr node, const std::string& planning_group = "left_arm");
+  explicit MotionPlanning(
+      rclcpp::Node::SharedPtr node,
+      const std::string& planning_group = "left_arm",
+      std::shared_ptr<robot_model_loader::RobotModelLoader> shared_loader = nullptr,
+      planning_scene_monitor::PlanningSceneMonitorPtr shared_planning_scene_monitor = nullptr,
+      rclcpp::Publisher<moveit_msgs::msg::DisplayTrajectory>::SharedPtr shared_display_publisher = nullptr);
   /*!\brief 析构函数 */
   ~MotionPlanning();
 
-  /*!\brief 初始化内部资源 (模型 / 可视化 / 发布器)
+  /*!rief 初始化内部资源 (模型 / 可视化 / 发布器)
    *  @return true 成功; false 失败
    */
   bool initialize();
+  
+  /*!rief 启用可视化工具 (可选,独立于initialize)
+   *  @param base_frame 基坐标系,默认"base_link"
+   *  @param marker_topic Marker发布话题,默认"k100_motion_trajectory"
+   *  @param enable_remote_control 是否启用远程控制(Joy按钮),默认false
+   *  @return true 成功; false 失败
+   */
+  bool enableVisualization(const std::string& base_frame = "base_link",
+                           const std::string& marker_topic = "k100_motion_trajectory",
+                           bool enable_remote_control = false);
+  
+  /*!rief 启用Joy按钮停止功能 (可选,独立于initialize)
+   *  @param button_index 按钮索引,默认4
+   *  @param topic Joy消息话题,默认"rviz_visual_tools_gui"
+   */
+  void enableJoyButtonStop(int button_index = 4, const std::string& topic = "rviz_visual_tools_gui");
 
   /*!\brief 规划一个末端姿态/位姿目标 (笛卡尔空间)
    *  @param pose 目标位姿 (header.frame_id 应与规划参考坐标系一致)
@@ -173,7 +194,8 @@ private:
   bool waitForJointStateCache(double timeout_sec = 2.0) const;
   rclcpp::Node::SharedPtr node_;
   std::string planning_group_;
-  robot_model_loader::RobotModelLoader robot_model_loader_;
+  std::shared_ptr<robot_model_loader::RobotModelLoader> robot_model_loader_ptr_;
+  bool owns_robot_model_loader_{false};
   moveit::core::RobotModelPtr          robot_model_;
   moveit::core::RobotStatePtr          robot_state_;
   const moveit::core::JointModelGroup* joint_model_group_ {nullptr};
@@ -181,6 +203,7 @@ private:
   moveit::planning_interface::MoveGroupInterface move_group_;
   moveit::planning_interface::PlanningSceneInterface planning_scene_interface_;
   int stop_button_index_ = 4; // 默认按钮索引
+  bool joy_button_exiting_ = false; // 退出标志,避免重复触发
   rclcpp::Subscription<sensor_msgs::msg::Joy>::SharedPtr joy_sub_; // STOP 按钮订阅
   rclcpp::Publisher<moveit_msgs::msg::DisplayTrajectory>::SharedPtr display_publisher_;
   std::unique_ptr<moveit_visual_tools::MoveItVisualTools> visual_tools_;

@@ -4,6 +4,7 @@
 #include <regex>
 #include <iostream>
 #include <cmath>
+#include <sstream>
 #include <ament_index_cpp/get_package_share_directory.hpp>
 #include <rosbag2_cpp/reader.hpp>
 #include <rosbag2_storage/storage_options.hpp>
@@ -23,31 +24,59 @@ K100MotionPlanningNode::K100MotionPlanningNode() : Node("k100_motion_planning_no
 bool K100MotionPlanningNode::initialize() {
     RCLCPP_INFO(this->get_logger(), "========== 初始化 K100 Motion Planning Node ==========");
 
-    // 初始化规划器
-    left_planner_ = std::make_shared<MotionPlanning>(shared_from_this(), "left_arm");
-    right_planner_ = std::make_shared<MotionPlanning>(shared_from_this(), "right_arm");
-    both_arms_planner_ = std::make_shared<MotionPlanning>(shared_from_this(), "both_arms");
+    // 共享 RobotModelLoader：只加载一次 robot_description
+    RCLCPP_INFO(this->get_logger(), "正在加载机器人模型...");
+    shared_robot_model_loader_ = std::make_shared<robot_model_loader::RobotModelLoader>(
+        shared_from_this(), "robot_description");
 
-    if (!left_planner_->initialize()) {
-        RCLCPP_FATAL(this->get_logger(), "左臂规划器初始化失败");
-        return false;
-    }
-    if (!right_planner_->initialize()) {
-        RCLCPP_FATAL(this->get_logger(), "右臂规划器初始化失败");
-        return false;
-    }
-    if (!both_arms_planner_->initialize()) {
-        RCLCPP_FATAL(this->get_logger(), "双臂规划器初始化失败");
-        return false;
+    // 注意：这里的 use_rviz 仅用于控制是否发布可视化轨迹。
+    // 并不会启动 RViz；RViz 是否启动由 MoveIt 的 demo.launch.py 决定。
+    bool use_rviz = this->declare_parameter<bool>("use_rviz", true);
+
+    // 共享 DisplayTrajectory 发布器（RViz MotionPlanning 插件显示用）
+    if (use_rviz) {
+        display_publisher_ = this->create_publisher<moveit_msgs::msg::DisplayTrajectory>("/display_planned_path", 1);
+    } else {
+        display_publisher_.reset();
     }
 
-    // 设置速度/加速度缩放
-    left_planner_->moveGroup()->setMaxVelocityScalingFactor(0.4);
-    left_planner_->moveGroup()->setMaxAccelerationScalingFactor(0.4);
-    right_planner_->moveGroup()->setMaxVelocityScalingFactor(0.4);
-    right_planner_->moveGroup()->setMaxAccelerationScalingFactor(0.4);
-    both_arms_planner_->moveGroup()->setMaxVelocityScalingFactor(0.4);
-    both_arms_planner_->moveGroup()->setMaxAccelerationScalingFactor(0.4);
+    // 共享 PlanningSceneMonitor：只创建/启动一次，所有规划组复用
+    auto robot_model = shared_robot_model_loader_->getModel();
+    if (!robot_model) {
+        RCLCPP_FATAL(this->get_logger(), "机器人模型加载失败(robot_description)");
+        return false;
+    }
+    shared_planning_scene_ = std::make_shared<planning_scene::PlanningScene>(robot_model);
+    shared_planning_scene_monitor_ = std::make_shared<planning_scene_monitor::PlanningSceneMonitor>(
+        shared_from_this(), shared_planning_scene_, shared_robot_model_loader_, "");
+
+    if (!shared_planning_scene_monitor_) {
+        RCLCPP_FATAL(this->get_logger(), "初始化共享 PlanningSceneMonitor 失败");
+        return false;
+    }
+
+    shared_planning_scene_monitor_->providePlanningSceneService();
+    shared_planning_scene_monitor_->startSceneMonitor();
+    shared_planning_scene_monitor_->startStateMonitor();
+
+    // 可选启用世界几何体监视
+    // bool enable_world_geometry_monitor = false;
+    // try {
+    //     enable_world_geometry_monitor = this->declare_parameter<bool>("enable_world_geometry_monitor", false);
+    // } catch (const rclcpp::exceptions::ParameterAlreadyDeclaredException&) {
+    //     this->get_parameter("enable_world_geometry_monitor", enable_world_geometry_monitor);
+    // }
+    // if (enable_world_geometry_monitor) {
+    //     shared_planning_scene_monitor_->startWorldGeometryMonitor();
+    //     RCLCPP_INFO(this->get_logger(), "World geometry monitor 已启用");
+    // } else {
+    //     RCLCPP_INFO(this->get_logger(), "World geometry monitor 未启用");
+    // }
+
+    // 规划器按需初始化（节省内存/启动时间）
+    left_planner_.reset();
+    right_planner_.reset();
+    both_arms_planner_.reset();
     // 初始化控制器切换客户端
     switch_controller_client_ = this->create_client<controller_manager_msgs::srv::SwitchController>(
         "/controller_manager/switch_controller", rmw_qos_profile_services_default, client_callback_group_);
@@ -88,6 +117,47 @@ bool K100MotionPlanningNode::initialize() {
     return true;
 }
 
+std::shared_ptr<MotionPlanning> K100MotionPlanningNode::initializePlannerIfNeeded(const std::string& group_name) {
+    std::shared_ptr<MotionPlanning>* planner_ptr = nullptr;
+    if (group_name == "left_arm") {
+        planner_ptr = &left_planner_;
+    } else if (group_name == "right_arm") {
+        planner_ptr = &right_planner_;
+    } else if (group_name == "both_arms") {
+        planner_ptr = &both_arms_planner_;
+    } else {
+        return nullptr;
+    }
+
+    if (*planner_ptr) {
+        return *planner_ptr;
+    }
+
+    RCLCPP_INFO(this->get_logger(), "首次使用 %s 规划器，正在初始化...", group_name.c_str());
+    *planner_ptr = std::make_shared<MotionPlanning>(
+        shared_from_this(), group_name, shared_robot_model_loader_, shared_planning_scene_monitor_, display_publisher_);
+    if (!(*planner_ptr)->initialize()) {
+        RCLCPP_FATAL(this->get_logger(), "%s 规划器初始化失败", group_name.c_str());
+        *planner_ptr = nullptr;
+        return nullptr;
+    }
+    (*planner_ptr)->moveGroup()->setMaxVelocityScalingFactor(0.4);
+    (*planner_ptr)->moveGroup()->setMaxAccelerationScalingFactor(0.4);
+
+    // 默认在启用 RViz 的情况下启用可视化工具（Marker 轨迹线）。
+    // 不启动 RViz 时（use_rviz:=false）跳过，避免无意义的发布与开销。
+    bool use_rviz = true;
+    if (this->has_parameter("use_rviz")) {
+        this->get_parameter("use_rviz", use_rviz);
+    }
+    if (use_rviz) {
+        // 使用默认参数：base_link / k100_motion_trajectory / remote_control=false
+        (*planner_ptr)->enableVisualization();
+    }
+
+    return *planner_ptr;
+}
+
 void K100MotionPlanningNode::waitForJointStates() {
     RCLCPP_INFO(this->get_logger(), "等待 joint_states 数据就绪...");
     bool joint_states_received = false;
@@ -118,9 +188,12 @@ bool K100MotionPlanningNode::switchControllers(const std::string& target_group) 
     if (target_group == "both_arms") {
         activate_controllers = {"both_arms_controller"};
         deactivate_controllers = {"left_arm_controller", "right_arm_controller"};
-    } else if (target_group == "left_arm" || target_group == "right_arm") {
-        activate_controllers = {"left_arm_controller", "right_arm_controller"};
-        deactivate_controllers = {"both_arms_controller"};
+    } else if (target_group == "left_arm") {
+        activate_controllers = {"left_arm_controller"};
+        deactivate_controllers = {"both_arms_controller", "right_arm_controller"};
+    } else if (target_group == "right_arm") {
+        activate_controllers = {"right_arm_controller"};
+        deactivate_controllers = {"both_arms_controller", "left_arm_controller"};
     } else {
         return true;
     }
@@ -130,9 +203,17 @@ bool K100MotionPlanningNode::switchControllers(const std::string& target_group) 
         return false;
     }
 
-    RCLCPP_INFO(this->get_logger(), "尝试切换控制器: Activate=[%s], Deactivate=[%s]", 
-        activate_controllers.empty() ? "" : activate_controllers[0].c_str(),
-        deactivate_controllers.empty() ? "" : deactivate_controllers[0].c_str());
+    auto join = [](const std::vector<std::string>& items) {
+        std::ostringstream oss;
+        for (size_t i = 0; i < items.size(); ++i) {
+            if (i) oss << ",";
+            oss << items[i];
+        }
+        return oss.str();
+    };
+    RCLCPP_INFO(this->get_logger(), "尝试切换控制器: Activate=[%s], Deactivate=[%s]",
+        join(activate_controllers).c_str(),
+        join(deactivate_controllers).c_str());
 
     auto request = std::make_shared<controller_manager_msgs::srv::SwitchController::Request>();
     request->activate_controllers = activate_controllers;
@@ -162,10 +243,7 @@ std::shared_ptr<MotionPlanning> K100MotionPlanningNode::getPlanner(const std::st
         return nullptr;
     }
 
-    if (group_name == "left_arm") return left_planner_;
-    if (group_name == "right_arm") return right_planner_;
-    if (group_name == "both_arms") return both_arms_planner_;
-    return nullptr;
+    return initializePlannerIfNeeded(group_name);
 }
 
 void K100MotionPlanningNode::planJointGoalCallback(const std::shared_ptr<k100_motion_planning::srv::PlanJointGoal::Request> request,
